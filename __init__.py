@@ -63,6 +63,7 @@ class Adb:
 
     def __init__(self, enabled=True):
         self._serial = None
+        self._is_connected = False
         self._is_log_enabled = enabled
         self._reset()
 
@@ -75,7 +76,22 @@ class Adb:
         self._is_log_enabled = enabled
 
     def s(self, serial):
+        """
+        Temporarily set global option -s <serial>, not connected
+        :param serial: <serial>
+        :return: self
+        """
         self._serial = serial
+        return self
+
+    def connect(self, serial):
+        """
+        Permanently connect to an emulator with serial
+        :param serial: <serial>
+        :return: self
+        """
+        self._serial = serial
+        self._is_connected = True
         return self
 
     def version(self):
@@ -218,7 +234,8 @@ class Adb:
         return self._exec_command(adb_sub_cmd)
 
     def _reset(self):
-        self._serial = None
+        if not self._is_connected:
+            self._serial = None
 
     def _prepare(self):
         p = [Adb.EXECUTABLE]

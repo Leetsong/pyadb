@@ -63,7 +63,6 @@ class Adb:
 
     def __init__(self, enabled=True):
         self._serial = None
-        self._is_connected = False
         self._is_log_enabled = enabled
         self._reset()
 
@@ -84,15 +83,47 @@ class Adb:
         self._serial = serial
         return self
 
-    def connect(self, serial):
+    def is_connected(self):
+        """
+        Whether connected an emulator or a device
+        :return: True if connected
+        """
+        return self._serial is not None
+
+    def connect(self, serial: str):
         """
         Permanently connect to an emulator with serial
         :param serial: <serial>
         :return: self
         """
-        self._serial = serial
-        self._is_connected = True
-        return self
+        if self.is_connected():
+            print('Error: already connect to %s' % self._serial)
+            return False
+        else:
+            self._serial = serial
+            return True
+
+    def disconnect(self):
+        """
+        Disconnect from the connected devices/emulators
+        :return: True if successfully disconnected
+        """
+        if self.is_connected():
+            self._serial = None
+            return True
+        else:
+            print('Error: no connection by far')
+            return False
+
+    def reconnect(self, serial: str):
+        """
+        Reconnect to a new device/emulator
+        :param serial: serial no of the emulator/device
+        :return: True if successfully connected
+        """
+        if self.is_connected():
+            self.disconnect()
+        return self.connect(serial)
 
     def version(self):
         """
@@ -234,10 +265,18 @@ class Adb:
         return self._exec_command(adb_sub_cmd)
 
     def _reset(self):
-        if not self._is_connected:
+        """
+        Reset self
+        :return: None
+        """
+        if not self.is_connected():
             self._serial = None
 
     def _prepare(self):
+        """
+        Prepare for executable and global options
+        :return: [executable, ...global_options]
+        """
         p = [Adb.EXECUTABLE]
         for gop in Adb.GLOBAL_OPTIONS:
             p.extend(gop(self))
@@ -250,7 +289,7 @@ class Adb:
         :return: True or False
         """
         result = self.get_serialno()
-        if result[1].strip() == "unknown":
+        if result[1].strip() == "error: no devices/emulators found":
             return False
         else:
             return True
@@ -288,9 +327,7 @@ class Adb:
         else:
             result = 0, str(output, encoding='utf-8').strip(' \t\n')
             print(result[1] + '\n')
-
         self._reset()  # reset state after each command
-
         return result
 
     def _exec_command_to_file(self, adb_cmd, dest_file_handler):
@@ -318,9 +355,7 @@ class Adb:
         else:
             result = output
             dest_file_handler.close()
-
         self._reset()  # reset state after each command
-
         return result
 
     def _u(self, s: str):
@@ -330,3 +365,4 @@ class Adb:
         :return: underlined string
         """
         return '\033[4m' + s + '\033[0m'
+

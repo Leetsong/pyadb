@@ -2,13 +2,31 @@ from __future__ import print_function
 
 import tempfile
 import shlex
-from typing import List, Callable
-from subprocess import check_output, CalledProcessError, call
+from typing import List, Callable, Optional
+from subprocess import \
+    check_output, \
+    CalledProcessError, \
+    call, \
+    Popen, \
+    PIPE
 
 
 __author__ = 'Simon Lee, Viktor Malyi'
 __email__ = 'leetsong.lc@gmail.com, v.stratus@gmail.com'
 __version__ = '1.3.0'
+
+
+#########################################
+# Helper functions
+#########################################
+
+def _underline(s: str) -> str:
+    """
+    Underline a string
+    :param s: string to be underlined
+    :return: underlined string
+    """
+    return '\033[4m' + s + '\033[0m'
 
 
 class Adb:
@@ -33,8 +51,9 @@ class AdbGlobalOption_s(AdbGlobalOption):
 # Adb Commands
 #########################################
 
-class AdbCommands:
+class AdbCommand:
     SHELL = 'shell'
+    EXEC_OUT = 'exec-out'
     PULL = 'pull'
     PUSH = 'push'
     UNINSTALL = 'uninstall'
@@ -51,6 +70,27 @@ class AdbCommands:
 
 
 #########################################
+# Adb Command Handles, and Exceptions
+#########################################
+
+# An AdbCommandHandle is a function which accepts
+# the output of the command as input, and returns a
+# flag to terminate the execution (True for terminating,
+# and o.w. False)
+AdbCommandHandle = Callable[[str], bool]
+
+
+class AdbNoCommandHandleException(Exception):
+    """
+    Any unterminated shell command should give an
+    AdbShellCommandHandler as the output handle,
+    or an AdbNoCommandHandleException will be raised
+    """
+    def __init__(self, message: str):
+        super().__init__(message)
+
+
+#########################################
 # Adb Implementation
 #########################################
 
@@ -60,19 +100,36 @@ class Adb:
     GLOBAL_OPTIONS: list = [
         AdbGlobalOption_s(),
     ]
+    DEFAULT_EXEC_HANDLER: AdbCommandHandle = lambda s: True
 
-    def __init__(self, enabled=True):
+    def __init__(self, log_command=True, log_output=True):
+        """
+        Adb is a python interface for adb
+        :param log_command: whether enable logging the invoked adb command
+        :param log_output: whether enable logging the output of the invoked adb command
+        """
         self._serial = None
-        self._is_log_enabled = enabled
+        self._is_log_output_enabled = log_output
+        self._is_log_command_enabled = log_command
         self._reset()
 
-    def enable_log(self, enabled: bool=True):
+    def enable_logging_command(self, enabled: bool = True):
         """
-        Enable or disable logging
+        Enable or disable logging command
         :param enabled: enable or not
         :return:
         """
-        self._is_log_enabled = enabled
+        self._is_log_command_enabled = enabled
+        return self
+
+    def enable_logging_output(self, enabled: bool = True):
+        """
+        Enable or disable logging output
+        :param enabled: enable or not
+        :return:
+        """
+        self._is_log_output_enabled = enabled
+        return self
 
     def s(self, serial):
         """
@@ -130,15 +187,15 @@ class Adb:
         Display the version of pyadb
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.VERSION]
+        adb_sub_cmd = [AdbCommand.VERSION]
         return self._exec_command(adb_sub_cmd)
 
-    def bugreport(self, dest_file: str="default.log"):
+    def bugreport(self, dest_file: str = "default.log"):
         """
         Prints dumpsys, dumpstate, and logcat data to the screen, for the purposes of bug reporting
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.BUGREPORT]
+        adb_sub_cmd = [AdbCommand.BUGREPORT]
         try:
             dest_file_handler = open(dest_file, "w")
         except IOError:
@@ -162,7 +219,7 @@ class Adb:
         :param dest: string destination path on target
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.PUSH, src, dest]
+        adb_sub_cmd = [AdbCommand.PUSH, src, dest]
         return self._exec_command(adb_sub_cmd)
 
     def pull(self, src: str, dest: str):
@@ -172,29 +229,55 @@ class Adb:
         :param dest: string destination path on host
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.PULL, src, dest]
+        adb_sub_cmd = [AdbCommand.PULL, src, dest]
         return self._exec_command(adb_sub_cmd)
 
-    def devices(self, opts: [None, list]=None):
+    def devices(self, opts: Optional[list] = None):
         """
         Get list of all available devices including emulators
         :param opts: list command options (e.g. ["-l"])
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.DEVICES, self._convert_opts(opts)]
+        adb_sub_cmd = [AdbCommand.DEVICES, self._convert_opts(opts)]
         return self._exec_command(adb_sub_cmd)
 
-    def shell(self, cmd: str):
+    def exec_out(self, cmd: str,
+                 timeout: Optional[int] = None,
+                 handle: Optional[AdbCommandHandle] = None,
+                 in_background: bool = True):
         """
-        Execute shell command on target
+        Execute command using exec-out on target, when timeout is -1 (means for
+        unterminated command), a handle should be given
         :param cmd: string shell command to execute
+        :param timeout: timeout for the command, -1 for unterminated command
+        :param handle: handle for unterminated shell command
+        :param in_background: whether asynchronously execute this command when unterminated
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.SHELL]
-        adb_sub_cmd.extend(shlex.split(cmd))
-        return self._exec_command(adb_sub_cmd)
+        return self._shell_or_exec_out(False, cmd,
+                                       timeout=timeout,
+                                       handle=handle,
+                                       in_background=in_background)
 
-    def install(self, apk: str, opts: [None, list]=None):
+    def shell(self, cmd: str,
+              timeout: Optional[int] = None,
+              handle: Optional[AdbCommandHandle] = None,
+              in_background: bool = True):
+        """
+        Execute command using shell on target, when timeout is -1 (means for
+        unterminated command), a handle should be given
+        :param cmd: string shell command to execute
+        :param timeout: timeout for the command, -1 for unterminated command
+        :param handle: handle for unterminated shell command
+        :param in_background: whether asynchronously execute this command when unterminated
+        :return: result of _exec_command() execution
+        """
+        return self._shell_or_exec_out(True, cmd,
+                                       timeout=timeout,
+                                       handle=handle,
+                                       in_background=in_background)
+
+    def install(self, apk: str, opts: Optional[list] = None):
         """
         Install *.apk on target
         :param apk: string path to apk on host to install
@@ -203,17 +286,17 @@ class Adb:
         """
         if opts is None:
             opts = list()
-        adb_sub_cmd = [AdbCommands.INSTALL, self._convert_opts(opts), apk]
+        adb_sub_cmd = [AdbCommand.INSTALL, self._convert_opts(opts), apk]
         return self._exec_command(adb_sub_cmd)
 
-    def uninstall(self, app: str, opts: [None, list]=None):
+    def uninstall(self, app: str, opts: Optional[list] = None):
         """
         Uninstall app from target
         :param app: app name to uninstall from target (e.g. "com.example.android.valid")
         :param opts: list command options (e.g. ["-r", "-a"])
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.UNINSTALL, self._convert_opts(opts), app]
+        adb_sub_cmd = [AdbCommand.UNINSTALL, self._convert_opts(opts), app]
         return self._exec_command(adb_sub_cmd)
 
     def get_serialno(self):
@@ -221,7 +304,7 @@ class Adb:
         Get serial number for all available target devices
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.GET_SERIALNO]
+        adb_sub_cmd = [AdbCommand.GET_SERIALNO]
         return self._exec_command(adb_sub_cmd)
 
     def wait_for_device(self):
@@ -229,7 +312,7 @@ class Adb:
         Block execution until the device is online
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.WAIT_FOR_DEVICE]
+        adb_sub_cmd = [AdbCommand.WAIT_FOR_DEVICE]
         return self._exec_command(adb_sub_cmd)
 
     def sync(self):
@@ -237,7 +320,7 @@ class Adb:
         Copy host->device only if changed
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.SHELL , AdbCommands.SYNC]
+        adb_sub_cmd = [AdbCommand.SHELL, AdbCommand.SYNC]
         return self._exec_command(adb_sub_cmd)
 
     def start_server(self):
@@ -245,7 +328,7 @@ class Adb:
         Startd pyadb server daemon on host
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.START_SERVER]
+        adb_sub_cmd = [AdbCommand.START_SERVER]
         return self._exec_command(adb_sub_cmd)
 
     def kill_server(self):
@@ -253,7 +336,7 @@ class Adb:
         Kill pyadb server daemon on host
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.KILL_SERVER]
+        adb_sub_cmd = [AdbCommand.KILL_SERVER]
         return self._exec_command(adb_sub_cmd)
 
     def get_state(self):
@@ -261,7 +344,7 @@ class Adb:
         Get state of device connected per pyadb
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommands.GET_STATE]
+        adb_sub_cmd = [AdbCommand.GET_STATE]
         return self._exec_command(adb_sub_cmd)
 
     def _reset(self):
@@ -294,7 +377,7 @@ class Adb:
         else:
             return True
 
-    def _convert_opts(self, opts: [None, list]):
+    def _convert_opts(self, opts: Optional[list]):
         """
         Convert list with command options to single string value
         with 'space' delimiter
@@ -303,11 +386,40 @@ class Adb:
         """
         return ' '.join(opts) if opts is not None else ''
 
-    def _exec_command(self, adb_cmd: list):
+    def _shell_or_exec_out(self, shell: bool, cmd: str,
+                           timeout: Optional[int] = None,
+                           handle: Optional[AdbCommandHandle] = None,
+                           in_background: bool = True):
+        """
+        Execute shell command on target, when timeout is -1 (means for
+        unterminated command), a handle should be given
+        :param shell: run it using 'shell' or 'exec-out'
+        :param cmd: string shell command to execute
+        :param timeout: timeout for the command, -1 for unterminated command
+        :param handle: handle for unterminated shell command
+        :param in_background: whether asynchronously execute this command when unterminated
+        :return: result of _exec_command() execution
+        """
+        if timeout == -1 and handle is None:
+            raise AdbNoCommandHandleException('No AdbShellCommandHandler is given')
+
+        adb_sub_cmd = [AdbCommand.SHELL if shell else AdbCommand.EXEC_OUT]
+        adb_sub_cmd.extend(shlex.split(cmd))
+        return self._exec_command(adb_sub_cmd,
+                                  timeout=timeout,
+                                  handle=handle,
+                                  in_background=in_background)
+
+    def _exec_command(self, adb_cmd: list,
+                      timeout: Optional[int] = None,
+                      handle: Optional[AdbCommandHandle] = None,
+                      in_background: bool = True):
         """
         Format pyadb command and execute it in shell
         :param adb_cmd: list pyadb command to execute
-        :return: string '0' and shell command output if successful, otherwise
+        :param handle: handle for unterminated shell command
+        :param in_background: whether asynchronously execute this command when unterminated
+        :return: 0 and shell command output if successful, otherwise
         raise CalledProcessError exception and return error code
         """
         t = tempfile.TemporaryFile()
@@ -316,19 +428,32 @@ class Adb:
             if e != '':  # avoid items with empty string...
                 final_adb_cmd.append(e)  # ... so that final command doesn't
                 # contain extra spaces
-        if self._is_log_enabled:
-            print(self._u('-> ' + ' '.join(final_adb_cmd) + '\n'))
+        if self._is_log_command_enabled:
+            print(_underline('-> ' + ' '.join(final_adb_cmd) + '\n'))
 
-        try:
-            output = check_output(final_adb_cmd, stderr=t)
-        except CalledProcessError as e:
-            t.seek(0)
-            result = e.returncode, str(t.read(), encoding='utf-8').strip(' \t\n')
+        if timeout == -1:  # unterminated
+            proc = Popen(final_adb_cmd, stdout=PIPE, stderr=t, universal_newlines=True)
+            if in_background:  # asynchronously execute it
+                # TODO add thread pool to handle background tasks
+                raise Exception('Background tasks are not implemented by far')
+            else:
+                while True:
+                    line = proc.stdout.readline()
+                    if handle(line):
+                        break
+            return 0, ''
         else:
-            result = 0, str(output, encoding='utf-8').strip(' \t\n')
-            print(result[1] + '\n')
-        self._reset()  # reset state after each command
-        return result
+            try:
+                output = check_output(final_adb_cmd, stderr=t)
+            except CalledProcessError as e:
+                t.seek(0)
+                result = e.returncode, str(t.read(), encoding='utf-8').strip(' \t\n')
+            else:
+                result = 0, str(output, encoding='utf-8').strip(' \t\n')
+                if self._is_log_output_enabled:
+                    print(result[1] + '\n')
+            self._reset()  # reset state after each command
+            return result
 
     def _exec_command_to_file(self, adb_cmd, dest_file_handler):
         """
@@ -344,7 +469,7 @@ class Adb:
             if e != '':  # avoid items with empty string...
                 final_adb_cmd.append(e)  # ... so that final command doesn't
                 # contain extra spaces
-        if self._is_log_enabled:
+        if self._is_log_command_enabled:
             print('-> ' + ' '.join(final_adb_cmd) + '\n')
 
         try:
@@ -357,12 +482,3 @@ class Adb:
             dest_file_handler.close()
         self._reset()  # reset state after each command
         return result
-
-    def _u(self, s: str):
-        """
-        Underline a string
-        :param s: string to be underlined
-        :return: underlined string
-        """
-        return '\033[4m' + s + '\033[0m'
-

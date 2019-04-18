@@ -16,6 +16,7 @@ Currently following adb commands are **supported**:
 * adb push
 * adb pull
 * adb shell
+* adb exec-out
 * adb devices
 * adb install
 * adb uninstall
@@ -28,6 +29,8 @@ Currently following adb commands are **supported**:
 * adb bugreport
 * adb wait-for-device
 
+### What's not supported?
+
 Currently following adb commands are **not supported**:
 
 * adb forward
@@ -36,6 +39,16 @@ Currently following adb commands are **not supported**:
 * adb help
 * adb -d
 * adb -e
+
+
+### What's TODO?
+
+* Add background support for unterminated support
+* Add adapters to provide more easy-to-use functions, e.g.
+    * getprop: (e.g., sdk version)
+    * getevent and sendevent
+    * input
+    * ...
 
 ### How to install?
 

@@ -43,7 +43,7 @@ Currently following adb commands are **not supported**:
 ### What's TODO?
 
 * Add background support for unterminated command
-* Add adapters to provide more easy-to-use functions, e.g.
+* Add adapters to provide more easy-to-use functions (see [here](http://gogs.njuics.cn/android/anip/src/master/src/anip/adb.py)), e.g.
     * getprop (e.g., sdk version)
     * getevent
     * sendevent

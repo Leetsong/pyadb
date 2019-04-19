@@ -29,6 +29,20 @@ def _underline(s: str) -> str:
     return '\033[4m' + s + '\033[0m'
 
 
+def _from_proc_output(output: bytes) -> str:
+    """
+    Convert proc output from bytes to str, and trim heading-
+    and tailing-spaces
+    :param s: output in bytes
+    :return: output in str
+    """
+    return str(output, encoding='utf-8').strip(' \t\n')
+
+
+#########################################
+# Pre-declaration
+#########################################
+
 class Adb:
     pass
 
@@ -101,7 +115,6 @@ class Adb:
         AdbGlobalOption_s(),
     ]
     DEFAULT_EXEC_HANDLER: AdbCommandHandle = lambda s: True
-    
 
     def __init__(self, log_command=True, log_output=True):
         """
@@ -131,6 +144,20 @@ class Adb:
         """
         self._is_log_output_enabled = enabled
         return self
+
+    def is_log_output_enabled(self):
+        """
+        As name shows
+        :return: as name shows
+        """
+        return self._is_log_output_enabled
+
+    def is_log_command_enabled(self):
+        """
+        As name shows
+        :return: as name shows
+        """
+        return self._is_log_command_enabled
 
     def s(self, serial):
         """
@@ -448,11 +475,15 @@ class Adb:
                 output = check_output(final_adb_cmd, stderr=t)
             except CalledProcessError as e:
                 t.seek(0)
-                result = e.returncode, str(t.read(), encoding='utf-8').strip(' \t\n')
+                result = e.returncode, _from_proc_output(t.read())
+                if (result[1] is None or result[1] == '') and e.stdout is not None:
+                    result = e.returncode, _from_proc_output(e.stdout)
             else:
-                result = 0, str(output, encoding='utf-8').strip(' \t\n')
-                if self._is_log_output_enabled:
-                    print(result[1] + '\n')
+                result = 0, _from_proc_output(output)
+            finally:
+                t.close()
+            if self._is_log_output_enabled:
+                print(result[1] + '\n')
             self._reset()  # reset state after each command
             return result
 
@@ -474,12 +505,16 @@ class Adb:
             print('-> ' + ' '.join(final_adb_cmd) + '\n')
 
         try:
-            output = call(final_adb_cmd, stdout=dest_file_handler, stderr=t)
+            returncode = call(final_adb_cmd, stdout=dest_file_handler, stderr=t)
         except CalledProcessError as e:
             t.seek(0)
-            result = e.returncode, str(t.read(), encoding='utf-8').strip(' \t\n')
+            result = e.returncode, _from_proc_output(t.read())
+            if (result[1] is None or result[1] == '') and e.stdout is not None:
+                result = e.returncode, _from_proc_output(e.stdout)
         else:
-            result = output
+            result = returncode, ''
+        finally:
+            t.close()
             dest_file_handler.close()
         self._reset()  # reset state after each command
         return result

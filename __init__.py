@@ -101,6 +101,7 @@ class Adb:
         AdbGlobalOption_s(),
     ]
     DEFAULT_EXEC_HANDLER: AdbCommandHandle = lambda s: True
+    
 
     def __init__(self, log_command=True, log_output=True):
         """
@@ -244,38 +245,38 @@ class Adb:
     def exec_out(self, cmd: str,
                  timeout: Optional[int] = None,
                  handle: Optional[AdbCommandHandle] = None,
-                 in_background: bool = True):
+                 block: bool = True):
         """
         Execute command using exec-out on target, when timeout is -1 (means for
         unterminated command), a handle should be given
         :param cmd: string shell command to execute
         :param timeout: timeout for the command, -1 for unterminated command
         :param handle: handle for unterminated shell command
-        :param in_background: whether asynchronously execute this command when unterminated
+        :param block: whether asynchronously execute this command when unterminated
         :return: result of _exec_command() execution
         """
         return self._shell_or_exec_out(False, cmd,
                                        timeout=timeout,
                                        handle=handle,
-                                       in_background=in_background)
+                                       block=block)
 
     def shell(self, cmd: str,
               timeout: Optional[int] = None,
               handle: Optional[AdbCommandHandle] = None,
-              in_background: bool = True):
+              block: bool = True):
         """
         Execute command using shell on target, when timeout is -1 (means for
         unterminated command), a handle should be given
         :param cmd: string shell command to execute
         :param timeout: timeout for the command, -1 for unterminated command
         :param handle: handle for unterminated shell command
-        :param in_background: whether asynchronously execute this command when unterminated
+        :param block: whether asynchronously execute this command when unterminated
         :return: result of _exec_command() execution
         """
         return self._shell_or_exec_out(True, cmd,
                                        timeout=timeout,
                                        handle=handle,
-                                       in_background=in_background)
+                                       block=block)
 
     def install(self, apk: str, opts: Optional[list] = None):
         """
@@ -389,7 +390,7 @@ class Adb:
     def _shell_or_exec_out(self, shell: bool, cmd: str,
                            timeout: Optional[int] = None,
                            handle: Optional[AdbCommandHandle] = None,
-                           in_background: bool = True):
+                           block: bool = True):
         """
         Execute shell command on target, when timeout is -1 (means for
         unterminated command), a handle should be given
@@ -397,7 +398,7 @@ class Adb:
         :param cmd: string shell command to execute
         :param timeout: timeout for the command, -1 for unterminated command
         :param handle: handle for unterminated shell command
-        :param in_background: whether asynchronously execute this command when unterminated
+        :param block: whether asynchronously execute this command when unterminated
         :return: result of _exec_command() execution
         """
         if timeout == -1 and handle is None:
@@ -408,17 +409,17 @@ class Adb:
         return self._exec_command(adb_sub_cmd,
                                   timeout=timeout,
                                   handle=handle,
-                                  in_background=in_background)
+                                  block=block)
 
     def _exec_command(self, adb_cmd: list,
                       timeout: Optional[int] = None,
                       handle: Optional[AdbCommandHandle] = None,
-                      in_background: bool = True):
+                      block: bool = True):
         """
         Format pyadb command and execute it in shell
         :param adb_cmd: list pyadb command to execute
         :param handle: handle for unterminated shell command
-        :param in_background: whether asynchronously execute this command when unterminated
+        :param block: whether asynchronously execute this command when unterminated
         :return: 0 and shell command output if successful, otherwise
         raise CalledProcessError exception and return error code
         """
@@ -433,7 +434,7 @@ class Adb:
 
         if timeout == -1:  # unterminated
             proc = Popen(final_adb_cmd, stdout=PIPE, stderr=t, universal_newlines=True)
-            if in_background:  # asynchronously execute it
+            if block:  # asynchronously execute it
                 # TODO add thread pool to handle background tasks
                 raise Exception('Background tasks are not implemented by far')
             else:

@@ -40,13 +40,13 @@ Currently following adb commands are **not supported**:
 * adb -d
 * adb -e
 
-
 ### What's TODO?
 
-* Add background support for unterminated support
+* Add background support for unterminated command
 * Add adapters to provide more easy-to-use functions, e.g.
-    * getprop: (e.g., sdk version)
-    * getevent and sendevent
+    * getprop (e.g., sdk version)
+    * getevent
+    * sendevent
     * input
     * ...
 

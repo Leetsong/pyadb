@@ -20,6 +20,7 @@ Currently following adb commands are **supported**:
 * adb devices
 * adb install
 * adb uninstall
+* adb reboot
 * adb get-serialno
 * adb start-server
 * adb kill-server
@@ -33,6 +34,7 @@ Currently following adb commands are **supported**:
 
 Currently following adb commands are **not supported**:
 
+* adb run-as
 * adb forward
 * adb logcat
 * adb jdwp

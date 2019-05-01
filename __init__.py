@@ -78,6 +78,7 @@ class AdbCommand:
     KILL_SERVER = 'kill-server'
     START_SERVER = 'start-server'
     GET_STATE = 'get-state'
+    REBOOT = 'reboot'
     SYNC = 'sync'
     VERSION = 'version'
     BUGREPORT = 'bugreport'
@@ -325,6 +326,14 @@ class Adb:
         :return: result of _exec_command() execution
         """
         adb_sub_cmd = [AdbCommand.UNINSTALL, self._convert_opts(opts), app]
+        return self._exec_command(adb_sub_cmd)
+
+    def reboot(self):
+        """
+        Reboot the device
+        :return: result of _exec_command() execution
+        """
+        adb_sub_cmd = [AdbCommand.REBOOT]
         return self._exec_command(adb_sub_cmd)
 
     def get_serialno(self):

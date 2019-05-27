@@ -73,6 +73,8 @@ class AdbCommand:
     UNINSTALL = 'uninstall'
     INSTALL = 'install'
     DEVICES = 'devices'
+    FORWARD = 'forward'
+    REVERSE = 'reverse'
     GET_SERIALNO = 'get-serialno'
     WAIT_FOR_DEVICE = 'wait-for-device'
     KILL_SERVER = 'kill-server'
@@ -241,24 +243,26 @@ class Adb:
         else:
             return 0, "Device Not Found"
 
-    def push(self, src: str, dest: str):
+    def push(self, src: List[str], dest: str, opts: Optional[list] = None):
         """
         Push object from host to target
-        :param src: string path to source object on host
-        :param dest: string destination path on target
+        :param src: list of paths to source objects on host
+        :param dest: destination path on target
+        :param opts: options
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommand.PUSH, src, dest]
+        adb_sub_cmd = [AdbCommand.PUSH, *src, dest, self._convert_opts(opts)]
         return self._exec_command(adb_sub_cmd)
 
-    def pull(self, src: str, dest: str):
+    def pull(self, src: List[str], dest: str, opts: Optional[list] = None):
         """
         Pull object from target to host
-        :param src: string path of object on target
-        :param dest: string destination path on host
+        :param src: list of paths of objects on target
+        :param dest: destination path on host
+        :param opts: options
         :return: result of _exec_command() execution
         """
-        adb_sub_cmd = [AdbCommand.PULL, src, dest]
+        adb_sub_cmd = [AdbCommand.PULL, *src, dest, self._convert_opts(opts)]
         return self._exec_command(adb_sub_cmd)
 
     def devices(self, opts: Optional[list] = None):
@@ -326,6 +330,26 @@ class Adb:
         :return: result of _exec_command() execution
         """
         adb_sub_cmd = [AdbCommand.UNINSTALL, self._convert_opts(opts), app]
+        return self._exec_command(adb_sub_cmd)
+
+    def forward(self, args):
+        """
+        Forward local (host machine) port to remote (android device) port
+        :param args: arguments to forward
+        :return: result of _exec_command() execution
+        """
+        adb_sub_cmd = [AdbCommand.FORWARD]
+        adb_sub_cmd.extend(shlex.split(args))
+        return self._exec_command(adb_sub_cmd)
+
+    def reverse(self, args):
+        """
+        Reverse remote (android device) port to local (host machine) port
+        :param args: arguments to forward
+        :return: result of _exec_command() execution
+        """
+        adb_sub_cmd = [AdbCommand.REVERSE]
+        adb_sub_cmd.extend(shlex.split(args))
         return self._exec_command(adb_sub_cmd)
 
     def reboot(self):

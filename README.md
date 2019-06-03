@@ -28,6 +28,7 @@ Currently following adb commands are **supported**:
 * adb kill-server
 * adb get-state
 * adb sync
+* adb root
 * adb version
 * adb bugreport
 * adb wait-for-device

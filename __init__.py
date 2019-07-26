@@ -503,7 +503,7 @@ class Adb:
 
         if timeout == -1:  # unterminated
             proc = Popen(final_adb_cmd, stdout=PIPE, stderr=t, universal_newlines=True)
-            if block:  # asynchronously execute it
+            if not block:  # asynchronously execute it
                 # TODO add thread pool to handle background tasks
                 raise Exception('Background tasks are not implemented by far')
             else:

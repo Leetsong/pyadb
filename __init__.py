@@ -68,6 +68,7 @@ class AdbGlobalOption_s(AdbGlobalOption):
 class AdbCommand:
     SHELL = 'shell'
     EXEC_OUT = 'exec-out'
+    LOGCAT = 'logcat'
     PULL = 'pull'
     PUSH = 'push'
     UNINSTALL = 'uninstall'
@@ -274,6 +275,22 @@ class Adb:
         """
         adb_sub_cmd = [AdbCommand.DEVICES, self._convert_opts(opts)]
         return self._exec_command(adb_sub_cmd)
+
+    def logcat(self, args,
+               timeout: Optional[int] = None,
+               handle: Optional[AdbCommandHandle] = None,
+               block: bool = True):
+        """
+        Display logcat logs
+        :param args: arguments to logcat
+        :param timeout: timeout for the command, -1 for unterminated command
+        :param handle: handle for unterminated shell command
+        :param block: whether asynchronously execute this command when unterminated
+        :return: result of _exec_command() execution
+        """
+        adb_sub_cmd = [AdbCommand.LOGCAT]
+        adb_sub_cmd.extend(shlex.split(args))
+        return self._exec_command(adb_sub_cmd, block=block, timeout=timeout, handle=handle)
 
     def exec_out(self, cmd: str,
                  timeout: Optional[int] = None,
@@ -509,7 +526,7 @@ class Adb:
             else:
                 while True:
                     line = proc.stdout.readline()
-                    if handle(line):
+                    if line is None or handle(line):
                         break
             return 0, ''
         else:

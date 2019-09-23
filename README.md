@@ -15,6 +15,7 @@ Currently following adb commands are **supported**:
 * adb -s
 * adb push
 * adb pull
+* adb logcat
 * adb shell
 * adb exec-out
 * adb devices
@@ -38,7 +39,6 @@ Currently following adb commands are **supported**:
 Currently following adb commands are **not supported**:
 
 * adb run-as
-* adb logcat
 * adb jdwp
 * adb help
 * adb -d

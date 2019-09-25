@@ -24,6 +24,7 @@ Currently following adb commands are **supported**:
 * adb forward
 * adb reverse
 * adb reboot
+* adb emu
 * adb get-serialno
 * adb start-server
 * adb kill-server

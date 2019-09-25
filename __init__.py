@@ -84,6 +84,7 @@ class AdbCommand:
     REBOOT = 'reboot'
     ROOT = 'root'
     SYNC = 'sync'
+    EMU = 'emu'
     VERSION = 'version'
     BUGREPORT = 'bugreport'
 
@@ -408,6 +409,16 @@ class Adb:
         :return: result of _exec_command() execution
         """
         adb_sub_cmd = [AdbCommand.SHELL, AdbCommand.SYNC]
+        return self._exec_command(adb_sub_cmd)
+
+    def emu(self, args):
+        """
+        Run emulator commands
+        :param args: arguments to emu
+        :return: result of _exec_command() execution
+        """
+        adb_sub_cmd = [AdbCommand.EMU]
+        adb_sub_cmd.extend(shlex.split(args))
         return self._exec_command(adb_sub_cmd)
 
     def start_server(self):

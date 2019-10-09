@@ -1,10 +1,11 @@
 from __future__ import print_function
 
 import tempfile
+import select
 import shlex
+from collections import namedtuple
 from typing import List, Callable, Optional
 from subprocess import \
-    check_output, \
     CalledProcessError, \
     call, \
     Popen, \
@@ -89,30 +90,25 @@ class AdbCommand:
     BUGREPORT = 'bugreport'
 
 
-#########################################
-# Adb Command Handles, and Exceptions
-#########################################
+##########################################
+# Adb Poll Command Callback
+##########################################
 
-# An AdbCommandHandle is a function which accepts
-# the output of the command as input, and returns a
-# flag to terminate the execution (True for terminating,
-# and o.w. False)
-AdbCommandHandle = Callable[[str], bool]
-
-
-class AdbNoCommandHandleException(Exception):
-    """
-    Any unterminated shell command should give an
-    AdbShellCommandHandler as the output handle,
-    or an AdbNoCommandHandleException will be raised
-    """
-    def __init__(self, message: str):
-        super().__init__(message)
+# An AdbPollCommandCallback is a function which accepts
+# (whether timeout, the output of the command) as
+# inputs, and returns a flag to terminate the execution
+# (True for terminating, and o.w. False)
+AdbPollCommandCallback = Callable[[bool, str], bool]
 
 
 #########################################
 # Adb Implementation
 #########################################
+
+# yielded result of _poll_command of type [bool, int, str, str]
+_AdbPollCommandResult = namedtuple('_AdbPollCommandResult',
+                                   ('timeout', 'rc', 'msg', 'err_msg'))
+
 
 class Adb:
 
@@ -120,7 +116,6 @@ class Adb:
     GLOBAL_OPTIONS: list = [
         AdbGlobalOption_s(),
     ]
-    DEFAULT_EXEC_HANDLER: AdbCommandHandle = lambda s: True
 
     def __init__(self, log_command=True, log_output=True):
         """
@@ -277,57 +272,64 @@ class Adb:
         adb_sub_cmd = [AdbCommand.DEVICES, self._convert_opts(opts)]
         return self._exec_command(adb_sub_cmd)
 
-    def logcat(self, args,
-               timeout: Optional[int] = None,
-               handle: Optional[AdbCommandHandle] = None,
-               block: bool = True):
+    def logcat(self, args):
         """
         Display logcat logs
         :param args: arguments to logcat
-        :param timeout: timeout for the command, -1 for unterminated command
-        :param handle: handle for unterminated shell command
-        :param block: whether asynchronously execute this command when unterminated
         :return: result of _exec_command() execution
         """
         adb_sub_cmd = [AdbCommand.LOGCAT]
         adb_sub_cmd.extend(shlex.split(args))
-        return self._exec_command(adb_sub_cmd, block=block, timeout=timeout, handle=handle)
+        return self._exec_command(adb_sub_cmd)
 
-    def exec_out(self, cmd: str,
-                 timeout: Optional[int] = None,
-                 handle: Optional[AdbCommandHandle] = None,
-                 block: bool = True):
+    def poll_logcat(self, args, callback: AdbPollCommandCallback, timeout: int):
         """
-        Execute command using exec-out on target, when timeout is -1 (means for
-        unterminated command), a handle should be given
+        Display logcat logs
+        :param args: arguments to logcat
+        :param callback: callback to handle each line
+        :param timeout: timeout for polling
+        """
+        adb_sub_cmd = [AdbCommand.LOGCAT]
+        adb_sub_cmd.extend(shlex.split(args))
+        try:
+            self._poll_cmd_output(adb_sub_cmd, timeout=timeout, callback=callback)
+        except CalledProcessError:
+            pass
+
+    def exec_out(self, cmd: str):
+        """
+        Execute command until finished using exec-out on target
         :param cmd: string shell command to execute
-        :param timeout: timeout for the command, -1 for unterminated command
-        :param handle: handle for unterminated shell command
-        :param block: whether asynchronously execute this command when unterminated
         :return: result of _exec_command() execution
         """
-        return self._shell_or_exec_out(False, cmd,
-                                       timeout=timeout,
-                                       handle=handle,
-                                       block=block)
+        adb_sub_cmd = [AdbCommand.EXEC_OUT]
+        adb_sub_cmd.extend(shlex.split(cmd))
+        return self._exec_command(adb_sub_cmd)
 
-    def shell(self, cmd: str,
-              timeout: Optional[int] = None,
-              handle: Optional[AdbCommandHandle] = None,
-              block: bool = True):
+    def shell(self, cmd: str):
         """
-        Execute command using shell on target, when timeout is -1 (means for
-        unterminated command), a handle should be given
+        Execute command until finished using shell on target
         :param cmd: string shell command to execute
-        :param timeout: timeout for the command, -1 for unterminated command
-        :param handle: handle for unterminated shell command
-        :param block: whether asynchronously execute this command when unterminated
         :return: result of _exec_command() execution
         """
-        return self._shell_or_exec_out(True, cmd,
-                                       timeout=timeout,
-                                       handle=handle,
-                                       block=block)
+        adb_sub_cmd = [AdbCommand.SHELL]
+        adb_sub_cmd.extend(shlex.split(cmd))
+        return self._exec_command(adb_sub_cmd)
+
+    def poll_out(self, cmd: str, callback: AdbPollCommandCallback,
+                 timeout, shell=False):
+        """
+        Execute command until finished using shell on target
+        :param cmd: string shell command to execute
+        :param callback: callback to handle each line
+        :param timeout: timeout for polling
+        :param shell: True for using shell else exec-out
+        :return: return code
+        """
+        adb_sub_cmd = [AdbCommand.SHELL if shell else AdbCommand.EXEC_OUT]
+        adb_sub_cmd.extend(shlex.split(cmd))
+        return self._poll_cmd_output(adb_sub_cmd, timeout=timeout,
+                                     callback=callback)
 
     def install(self, apk: str, opts: Optional[list] = None):
         """
@@ -484,41 +486,35 @@ class Adb:
         """
         return ' '.join(opts) if opts is not None else ''
 
-    def _shell_or_exec_out(self, shell: bool, cmd: str,
-                           timeout: Optional[int] = None,
-                           handle: Optional[AdbCommandHandle] = None,
-                           block: bool = True):
+    def _exec_command(self, adb_cmd: list):
         """
-        Execute shell command on target, when timeout is -1 (means for
-        unterminated command), a handle should be given
-        :param shell: run it using 'shell' or 'exec-out'
-        :param cmd: string shell command to execute
-        :param timeout: timeout for the command, -1 for unterminated command
-        :param handle: handle for unterminated shell command
-        :param block: whether asynchronously execute this command when unterminated
-        :return: result of _exec_command() execution
+        Execute adb_cmd and get return code and output
+        :param adb_cmd: list pyabd command to execute
+        :return: (returncode, output)
         """
-        if timeout == -1 and handle is None:
-            raise AdbNoCommandHandleException('No AdbShellCommandHandler is given')
+        buf = []
 
-        adb_sub_cmd = [AdbCommand.SHELL if shell else AdbCommand.EXEC_OUT]
-        adb_sub_cmd.extend(shlex.split(cmd))
-        return self._exec_command(adb_sub_cmd,
-                                  timeout=timeout,
-                                  handle=handle,
-                                  block=block)
+        def callback(timeout, line):
+            if timeout:
+                return False
+            buf.append(line)
+            return False
 
-    def _exec_command(self, adb_cmd: list,
-                      timeout: Optional[int] = None,
-                      handle: Optional[AdbCommandHandle] = None,
-                      block: bool = True):
+        try:
+            self._poll_cmd_output(adb_cmd, timeout=0, callback=callback)
+        except CalledProcessError as e:
+            return e.returncode, e.stderr
+
+        return 0, ''.join(buf)
+
+    def _poll_cmd_output(self, adb_cmd: list, timeout: int = 0,
+                         callback: AdbPollCommandCallback = lambda _, __: False):
         """
-        Format pyadb command and execute it in shell
+        Format pyadb command and execute it in shell, _poll_cmd_output will poll
+        stdout of adb_command for timeout ms to fetch the output each time,
         :param adb_cmd: list pyadb command to execute
-        :param handle: handle for unterminated shell command
-        :param block: whether asynchronously execute this command when unterminated
-        :return: 0 and shell command output if successful, otherwise
-        raise CalledProcessError exception and return error code
+        :param timeout: timeout in millisecond for polling
+        :param callback: for handling output
         """
         t = tempfile.TemporaryFile()
         final_adb_cmd = self._prepare()
@@ -529,40 +525,38 @@ class Adb:
         if self._is_log_command_enabled:
             print(_underline('-> ' + ' '.join(final_adb_cmd) + '\n'))
 
-        if timeout == -1:  # unterminated
-            proc = Popen(final_adb_cmd, stdout=PIPE, stderr=t, universal_newlines=True)
-            if not block:  # asynchronously execute it
-                # TODO add thread pool to handle background tasks
-                raise Exception('Background tasks are not implemented by far')
-            else:
-                while True:
-                    line = proc.stdout.readline()
-                    if line is None or handle(line):
-                        break
-            return 0, ''
-        else:
-            try:
-                output = check_output(final_adb_cmd, stderr=t)
-            except CalledProcessError as e:
-                t.seek(0)
-                result = e.returncode, _from_proc_output(t.read())
-                if (result[1] is None or result[1] == '') and e.stdout is not None:
-                    result = e.returncode, _from_proc_output(e.stdout)
-            else:
-                result = 0, _from_proc_output(output)
-            finally:
-                t.close()
-            if self._is_log_output_enabled:
-                print(result[1] + '\n')
-            self._reset()  # reset state after each command
-            return result
+        poller = select.poll()
+        proc = Popen(final_adb_cmd, stdout=PIPE, stderr=t, universal_newlines=True)
+        poller.register(proc.stdout, select.POLLIN)  # register stdout:r as polled object
+        while True:
+            result = poller.poll(timeout)
+            if len(result) == 0:  # timeout
+                if callback(True, ''):
+                    break
+                continue
+            line = proc.stdout.readline()  # read output
+            rc = proc.poll()  # check return code
+            if line == '' and rc is not None:  # process is dead
+                if rc != 0:  # failed, raise an exception
+                    t.seek(0)  # seek to 0 position of err
+                    err = _from_proc_output(t.read())
+                    t.close()
+                    raise CalledProcessError(returncode=rc, cmd=' '.join(final_adb_cmd),
+                                             output=None, stderr=err)
+                else:
+                    break
+            if callback(False, line):
+                break
+
+        t.close()
+        self._reset()  # reset state after each command
 
     def _exec_command_to_file(self, adb_cmd, dest_file_handler):
         """
         Format pyadb command and execute it in shell and redirects to a file
         :param adb_cmd: list pyadb command to execute
         :param dest_file_handler: file handler to which output will be redirected
-        :return: string '0' and writes shell command output to file if successful, otherwise
+        :return: 0 and writes shell command output to file if successful, otherwise
         raise CalledProcessError exception and return error code
         """
         t = tempfile.TemporaryFile()
@@ -575,16 +569,39 @@ class Adb:
             print('-> ' + ' '.join(final_adb_cmd) + '\n')
 
         try:
-            returncode = call(final_adb_cmd, stdout=dest_file_handler, stderr=t)
+            call(final_adb_cmd, stdout=dest_file_handler, stderr=t)
         except CalledProcessError as e:
-            t.seek(0)
-            result = e.returncode, _from_proc_output(t.read())
-            if (result[1] is None or result[1] == '') and e.stdout is not None:
-                result = e.returncode, _from_proc_output(e.stdout)
-        else:
-            result = returncode, ''
+            raise e
         finally:
             t.close()
             dest_file_handler.close()
         self._reset()  # reset state after each command
-        return result
+        return 0
+
+
+if __name__ == '__main__':
+    adb = Adb(False, False)
+    counter = 0
+
+    def on_logcat(timeout, line) -> bool:
+        global counter
+        if timeout:
+            return False
+        if counter == 20:
+            return True
+        if line is None or line == '':
+            return False
+        print(line.strip())
+        counter += 1
+        return False
+
+    def on_event(timeout, line) -> bool:
+        if timeout:
+            return False
+        if line is None or line == '':
+            return False
+        print(line.strip())
+        return False
+
+    # adb.poll_out('getevent -tlq', callback=on_event, timeout=0, shell=False)
+    adb.poll_logcat('-s DroidTrace', callback=on_logcat, timeout=0)

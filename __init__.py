@@ -660,7 +660,7 @@ class Adb:
         reader = NonBlockingReader(proc.stdout)
         while True:
             try:
-                line = reader.readline(timeout)  # read one line
+                line = reader.readline(timeout / 1000)  # read one line
             except reader.TimeoutException:
                 if callback(True, ''):  # callback to give opportunity for termination
                     break

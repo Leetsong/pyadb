@@ -656,16 +656,16 @@ class Adb:
         if self._is_log_command_enabled:
             print(_underline('-> ' + ' '.join(final_adb_cmd) + '\n'))
 
-        proc = Popen(final_adb_cmd, stdout=PIPE, stderr=t, universal_newlines=True)
-        reader = NonBlockingReader(proc.stdout)
+        proc = Popen(final_adb_cmd, stdout=PIPE, stderr=t)  # binary output, 'cause no universal_newlines
+        reader = NonBlockingReader(proc.stdout)  # binary reader
         while True:
             try:
-                line = reader.readline(timeout / 1000)  # read one line
+                binary_line = reader.readline(timeout / 1000)  # read one binary line
             except reader.TimeoutException:
                 if callback(True, ''):  # callback to give opportunity for termination
                     break
                 continue
-            if line is None:  # done reading
+            if binary_line is None:  # done reading
                 rc = proc.poll()  # check return code
                 if rc == 0:  # succeeded
                     break
@@ -677,8 +677,13 @@ class Adb:
                 proc.terminate()
                 raise CalledProcessError(returncode=rc, cmd=' '.join(final_adb_cmd),
                                          output=None, stderr=err)
-            if callback(False, line):
-                break
+            try:
+                text_line = str(binary_line, encoding='utf-8')  # convert to utf-8
+            except UnicodeDecodeError as e:
+                pass  # ignored
+            else:
+                if callback(False, text_line):
+                    break
 
         reader.close()
         t.close()
